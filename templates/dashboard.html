@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Robot d'Analyse Boursière</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .alert-blink { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                🤖 Robot d'Analyse Boursière
+            </h1>
+            <p class="text-gray-400">Détection automatique des chutes d'actions importantes</p>
+            <div id="status" class="mt-4">
+                <span class="px-3 py-1 rounded-full text-sm bg-gray-700">Chargement...</span>
+            </div>
+        </div>
+
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <div class="flex flex-wrap items-center gap-4 mb-4">
+                <button onclick="analyzeNow()" id="analyzeBtn" 
+                        class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-medium transition-colors">
+                    🔍 Analyser Maintenant
+                </button>
+                
+                <button onclick="testTelegram()" 
+                        class="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-medium transition-colors">
+                    📱 Test Telegram
+                </button>
+                
+                <button onclick="refreshData()" 
+                        class="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-medium transition-colors">
+                    🔄 Actualiser
+                </button>
+            </div>
+            
+            <div class="text-sm text-gray-400">
+                <span id="lastUpdate">Dernière mise à jour: --</span>
+            </div>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-1">
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                        📈 Liste de Surveillance
+                        <span id="watchlistCount" class="bg-blue-600 text-xs px-2 py-1 rounded-full">0</span>
+                    </h2>
+                    
+                    <div class="mb-4">
+                        <input type="text" id="newSymbol" placeholder="Ex: AAPL" 
+                               class="bg-gray-700 border border-gray-600 rounded px-3 py-2 w-full mb-2">
+                        <button onclick="addSymbol()" 
+                                class="bg-blue-600 hover:bg-blue-700 w-full px-4 py-2 rounded transition-colors">
+                            Ajouter Action
+                        </button>
+                    </div>
+
+                    <div id="watchlistContainer" class="space-y-2 max-h-96 overflow-y-auto">
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold flex items-center gap-2">
+                            🚨 Alertes Récentes
+                            <span id="alertsCount" class="bg-red-600 text-xs px-2 py-1 rounded-full">0</span>
+                        </h2>
+                    </div>
+
+                    <div id="alertsContainer" class="space-y-3 max-h-80 overflow-y-auto">
+                        <div class="text-gray-400 text-center py-8">
+                            Aucune alerte pour le moment
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4">📊 Aperçu du Marché</h2>
+                    <div id="stockDataContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="text-gray-400 text-center py-8 col-span-full">
+                            Chargement des données...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let watchlist = [];
+        let lastUpdateTime = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStatus();
+            loadWatchlist();
+            loadAlerts();
+            loadStockData();
+            
+            setInterval(() => {
+                loadStatus();
+                loadAlerts();
+                loadStockData();
+            }, 30000);
+        });
+
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('status');
+                if (data.is_running) {
+                    statusEl.innerHTML = '<span class="px-3 py-1 rounded-full text-sm bg-yellow-600 alert-blink">🔄 Analyse en cours...</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="px-3 py-1 rounded-full text-sm bg-green-600">✅ Prêt</span>';
+                }
+                
+                document.getElementById('watchlistCount').textContent = data.watchlist_size;
+                lastUpdateTime = new Date();
+                document.getElementById('lastUpdate').textContent = 
+                    `Dernière mise à jour: ${lastUpdateTime.toLocaleTimeString()}`;
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
+        }
+
+        async function loadWatchlist() {
+            try {
+                const response = await fetch('/api/watchlist');
+                const data = await response.json();
+                watchlist = data.symbols;
+                renderWatchlist();
+            } catch (error) {
+                console.error('Error loading watchlist:', error);
+            }
+        }
+
+        function renderWatchlist() {
+            const container = document.getElementById('watchlistContainer');
+            if (watchlist.length === 0) {
+                container.innerHTML = '<div class="text-gray-400 text-center py-4">Liste vide</div>';
+                return;
+            }
+
+            container.innerHTML = watchlist.map(symbol => `
+                <div class="flex items-center justify-between bg-gray-700 rounded-lg p-3">
+                    <span class="font-medium">${symbol}</span>
+                    <button onclick="removeSymbol('${symbol}')" 
+                            class="text-red-400 hover:text-red-300">
+                        ✕
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function addSymbol() {
+            const input = document.getElementById('newSymbol');
+            const symbol = input.value.trim().toUpperCase();
+            
+            if (!symbol || watchlist.includes(symbol)) return;
+            
+            watchlist.push(symbol);
+            await updateWatchlist();
+            input.value = '';
+        }
+
+        async function removeSymbol(symbol) {
+            watchlist = watchlist.filter(s => s !== symbol);
+            await updateWatchlist();
+        }
+
+        async function updateWatchlist() {
+            try {
+                await fetch('/api/watchlist', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({symbols: watchlist})
+                });
+                renderWatchlist();
+                loadStatus();
+            } catch (error) {
+                console.error('Error updating watchlist:', error);
+            }
+        }
+
+        async function analyzeNow() {
+            const btn = document.getElementById('analyzeBtn');
+            btn.disabled = true;
+            btn.textContent = '🔄 Analyse...';
+            
+            try {
+                const response = await fetch('/api/analyze', {method: 'POST'});
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ Analyse terminée! ${data.alerts_sent} alertes envoyées.`);
+                    loadAlerts();
+                    loadStockData();
+                } else {
+                    alert('❌ Erreur lors de l\'analyse');
+                }
+            } catch (error) {
+                console.error('Error analyzing:', error);
+                alert('❌ Erreur de connexion');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 Analyser Maintenant';
+            }
+        }
+
+        async function testTelegram() {
+            try {
+                const response = await fetch('/api/test-telegram', {method: 'POST'});
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('✅ Message Telegram envoyé avec succès!');
+                } else {
+                    alert('❌ Erreur Telegram: ' + (data.error || 'Inconnue'));
+                }
+            } catch (error) {
+                console.error('Error testing Telegram:', error);
+                alert('❌ Erreur de connexion');
+            }
+        }
+
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/api/alerts');
+                const data = await response.json();
+                
+                document.getElementById('alertsCount').textContent = data.alerts.length;
+                
+                const container = document.getElementById('alertsContainer');
+                if (data.alerts.length === 0) {
+                    container.innerHTML = '<div class="text-gray-400 text-center py-8">Aucune alerte récente</div>';
+                    return;
+                }
+
+                container.innerHTML = data.alerts.map(alert => `
+                    <div class="p-4 rounded-lg border-l-4 ${
+                        Math.abs(alert.change_percent) > 25 ? 'bg-red-900/30 border-red-500' : 'bg-yellow-900/30 border-yellow-500'
+                    }">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-${Math.abs(alert.change_percent) > 25 ? 'red' : 'yellow'}-400 text-lg">
+                                ${Math.abs(alert.change_percent) > 25 ? '🔴' : '🟡'}
+                            </span>
+                            <span class="font-medium">${alert.symbol}</span>
+                            <span class="text-sm text-gray-400">
+                                ${new Date(alert.timestamp).toLocaleString()}
+                            </span>
+                        </div>
+                        <div class="text-sm">
+                            <div class="text-red-400 font-medium">
+                                Chute de ${Math.abs(alert.change_percent).toFixed(1)}% cette semaine
+                            </div>
+                            <div class="text-gray-300">
+                                Prix actuel: $${alert.price.toFixed(2)}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+            }
+        }
+
+        async function loadStockData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+                
+                const container = document.getElementById('stockDataContainer');
+                if (!data.stocks || data.stocks.length === 0) {
+                    container.innerHTML = '<div class="text-gray-400 text-center py-8 col-span-full">Aucune donnée disponible</div>';
+                    return;
+                }
+
+                container.innerHTML = data.stocks.map(stock => `
+                    <div class="p-4 rounded-lg ${
+                        stock.is_alert ? 'bg-red-900/20 border border-red-700' : 'bg-gray-700'
+                    }">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-medium">${stock.symbol}</h3>
+                            ${stock.is_alert ? '<span class="text-red-400">🚨</span>' : ''}
+                        </div>
+                        <div class="text-2xl font-bold mb-1">$${stock.current_price?.toFixed(2) || '--'}</div>
+                        <div class="text-sm ${
+                            (stock.weekly_change || 0) < 0 ? 'text-red-400' : 'text-green-400'
+                        }">
+                            ${stock.weekly_change > 0 ? '+' : ''}${stock.weekly_change?.toFixed(2) || '--'}% (7 jours)
+                        </div>
+                        <div class="text-xs text-gray-400 mt-2">
+                            ${stock.last_update ? new Date(stock.last_update).toLocaleString() : 'Pas de données'}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading stock data:', error);
+            }
+        }
+
+        function refreshData() {
+            loadStatus();
+            loadWatchlist();
+            loadAlerts();
+            loadStockData();
+        }
+
+        document.getElementById('newSymbol').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addSymbol();
+            }
+        });
+    </script>
+</body>
+</html>
